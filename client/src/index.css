@@ -215,3 +215,12 @@
 .star-rating .star:hover {
   transform: scale(1.2);
 }
+
+.wandering-cat-sprite {
+  image-rendering: auto;
+  filter: drop-shadow(0 6px 12px rgb(0 0 0 / 24%));
+}
+
+.wandering-cat-sprite--fallback {
+  filter: none;
+}

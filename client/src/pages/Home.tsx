@@ -144,7 +144,7 @@ export default function Home() {
             </p>
 
             {/* Search bar */}
-            <form onSubmit={handleSearch} className="flex gap-2 max-w-md mx-auto">
+            <form onSubmit={handleSearch} data-cat-avoid-zone="search" className="flex gap-2 max-w-md mx-auto">
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} />
                 <Input
