@@ -1,4 +1,12 @@
-import { MapPin, Tag, ExternalLink, ShieldCheck, ShieldQuestion, ShieldAlert, Sparkles } from "lucide-react";
+import {
+  ExternalLink,
+  MapPin,
+  ShieldAlert,
+  ShieldCheck,
+  ShieldQuestion,
+  Sparkles,
+  Tag,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
@@ -23,94 +31,140 @@ interface AgentResultCardProps {
   isSelected?: boolean;
 }
 
-function ConfidenceBadge({ confidence }: { confidence: "high" | "medium" | "low" }) {
+export function getAgentResultStatus(
+  result: Pick<AgentResult, "has_gakuwari" | "confidence">
+) {
+  if (result.has_gakuwari) {
+    return { label: "学割あり", tone: "positive" as const };
+  }
+
+  if (result.confidence === "low") {
+    return { label: "未確認", tone: "unknown" as const };
+  }
+
+  return { label: "学割なし", tone: "negative" as const };
+}
+
+function ConfidenceBadge({
+  confidence,
+}: {
+  confidence: "high" | "medium" | "low";
+}) {
   const config = {
-    high: { icon: ShieldCheck, label: "信頼度: 高", className: "bg-memphis-mint text-foreground border-foreground" },
-    medium: { icon: ShieldQuestion, label: "信頼度: 中", className: "bg-memphis-yellow text-foreground border-foreground" },
-    low: { icon: ShieldAlert, label: "信頼度: 低", className: "bg-memphis-coral/30 text-foreground border-foreground" },
+    high: {
+      icon: ShieldCheck,
+      label: "確信度: 高",
+      className: "bg-memphis-mint text-foreground border-foreground",
+    },
+    medium: {
+      icon: ShieldQuestion,
+      label: "確信度: 中",
+      className: "bg-memphis-yellow text-foreground border-foreground",
+    },
+    low: {
+      icon: ShieldAlert,
+      label: "確信度: 低",
+      className: "bg-memphis-coral/30 text-foreground border-foreground",
+    },
   };
   const { icon: Icon, label, className } = config[confidence];
+
   return (
-    <Badge className={cn("text-xs px-2 py-0.5 border-2 gap-1", className)}>
+    <Badge className={cn("border-2 px-2 py-0.5 text-xs gap-1", className)}>
       <Icon size={12} />
       {label}
     </Badge>
   );
 }
 
-export function AgentResultCard({ result, onClick, isSelected }: AgentResultCardProps) {
+export function AgentResultCard({
+  result,
+  onClick,
+  isSelected,
+}: AgentResultCardProps) {
+  const status = getAgentResultStatus(result);
+
   return (
     <div
       onClick={onClick}
       className={cn(
-        "memphis-card rounded-xl bg-card overflow-hidden cursor-pointer transition-all",
+        "memphis-card overflow-hidden rounded-xl bg-card transition-all cursor-pointer",
         isSelected && "ring-2 ring-primary ring-offset-2"
       )}
     >
       <div className="p-3 sm:p-4">
-        {/* Header row */}
-        <div className="flex items-start justify-between gap-2 mb-2">
-          <div className="flex-1 min-w-0">
-            <h3 className="font-bold text-base leading-tight line-clamp-1">
+        <div className="mb-2 flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <h3 className="line-clamp-1 text-base font-bold leading-tight">
               {result.name}
             </h3>
-            <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5 line-clamp-1">
+            <p className="mt-0.5 flex items-center gap-1 line-clamp-1 text-xs text-muted-foreground">
               <MapPin size={12} className="shrink-0" />
               {result.address}
             </p>
           </div>
-          {result.has_gakuwari ? (
-            <Badge className="memphis-btn bg-memphis-yellow text-foreground border-foreground text-xs px-2 py-0.5 shrink-0">
+
+          {status.tone === "positive" ? (
+            <Badge className="memphis-btn shrink-0 border-foreground bg-memphis-yellow px-2 py-0.5 text-xs text-foreground">
               <Tag size={12} className="mr-1" />
-              学割あり
+              {status.label}
             </Badge>
           ) : (
-            <Badge variant="outline" className="text-xs px-2 py-0.5 shrink-0 border-2 text-muted-foreground">
-              学割なし
+            <Badge
+              variant="outline"
+              className={cn(
+                "shrink-0 border-2 px-2 py-0.5 text-xs",
+                status.tone === "unknown"
+                  ? "border-foreground/40 bg-memphis-lilac/20 text-foreground"
+                  : "text-muted-foreground"
+              )}
+            >
+              {status.label}
             </Badge>
           )}
         </div>
 
-        {/* Discount info */}
         {result.has_gakuwari && result.discount_info && (
-          <div className="bg-memphis-yellow/20 border-2 border-foreground/10 rounded-lg p-2.5 mb-2">
+          <div className="mb-2 rounded-lg border-2 border-foreground/10 bg-memphis-yellow/20 p-2.5">
             <div className="flex items-start gap-2">
-              <Sparkles size={14} className="text-primary shrink-0 mt-0.5" />
-              <p className="text-sm font-medium text-foreground/90 leading-snug">
+              <Sparkles size={14} className="mt-0.5 shrink-0 text-primary" />
+              <p className="text-sm font-medium leading-snug text-foreground/90">
                 {result.discount_info}
               </p>
             </div>
           </div>
         )}
 
-        {/* Footer */}
-        <div className="flex items-center justify-between gap-2 mt-2">
+        <div className="mt-2 flex items-center justify-between gap-2">
           <ConfidenceBadge confidence={result.confidence} />
+
           <div className="flex items-center gap-2">
             {result.rating && (
               <span className="text-xs text-muted-foreground">
                 ★ {result.rating.toFixed(1)}
               </span>
             )}
+
             {result.source_url && (
               <a
                 href={result.source_url}
                 target="_blank"
                 rel="noopener noreferrer"
-                onClick={(e) => e.stopPropagation()}
-                className="text-xs text-primary hover:underline flex items-center gap-0.5"
+                onClick={(event) => event.stopPropagation()}
+                className="flex items-center gap-0.5 text-xs text-primary hover:underline"
               >
                 <ExternalLink size={10} />
                 出典
               </a>
             )}
+
             {result.website && (
               <a
                 href={result.website}
                 target="_blank"
                 rel="noopener noreferrer"
-                onClick={(e) => e.stopPropagation()}
-                className="text-xs text-primary hover:underline flex items-center gap-0.5"
+                onClick={(event) => event.stopPropagation()}
+                className="flex items-center gap-0.5 text-xs text-primary hover:underline"
               >
                 <ExternalLink size={10} />
                 公式

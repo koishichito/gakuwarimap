@@ -1,28 +1,70 @@
-import { useState, useRef, useEffect, useCallback } from "react";
-import { trpc } from "@/lib/trpc";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Slider } from "@/components/ui/slider";
-import { MemphisBackground } from "@/components/MemphisDecorations";
-import { AgentResultCard, type AgentResult } from "@/components/AgentResultCard";
-import { MapView } from "@/components/Map";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  AlertCircle,
   Bot,
+  Cloud,
+  Cpu,
+  Filter,
+  Loader2,
+  MapPin,
   Navigation,
   Search,
-  MapPin,
-  Loader2,
-  AlertCircle,
   Sparkles,
-  Filter,
-  Cpu,
-  Cloud,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { AgentResultCard, getAgentResultStatus, type AgentResult } from "@/components/AgentResultCard";
+import { MemphisBackground } from "@/components/MemphisDecorations";
+import { MapView } from "@/components/Map";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Slider } from "@/components/ui/slider";
+import { cn } from "@/lib/utils";
+import { trpc } from "@/lib/trpc";
 
 const DEFAULT_AGENT_LOCATION = { lat: 35.6595, lng: 139.7005 };
+
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function buildInfoWindowContent(result: AgentResult) {
+  const status = getAgentResultStatus(result);
+  const description = result.has_gakuwari
+    ? result.discount_info || status.label
+    : status.tone === "unknown"
+      ? "学割情報は未確認です"
+      : "学割は確認できませんでした";
+  const backgroundColor =
+    status.tone === "positive"
+      ? "#fef3c7"
+      : status.tone === "unknown"
+        ? "#ede9fe"
+        : "#f3f4f6";
+
+  return `
+    <div style="font-family:'Noto Sans JP',sans-serif;padding:8px;max-width:240px;">
+      <strong style="display:block;font-size:14px;margin-bottom:6px;">
+        ${escapeHtml(result.name)}
+      </strong>
+      <div style="margin:6px 0;padding:6px 8px;background:${backgroundColor};border-radius:8px;font-size:12px;">
+        ${escapeHtml(description)}
+      </div>
+      ${
+        result.rating
+          ? `<p style="font-size:11px;color:#4b5563;margin:4px 0;">評価 ${result.rating.toFixed(1)}</p>`
+          : ""
+      }
+      <p style="font-size:11px;color:#6b7280;margin-top:4px;">
+        ${escapeHtml(result.address)}
+      </p>
+    </div>
+  `;
+}
 
 export default function AgentSearch() {
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(
@@ -41,68 +83,86 @@ export default function AgentSearch() {
   const markersRef = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
   const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
 
-  // Agent search mutation
   const agentSearch = trpc.agent.searchGakuwari.useMutation({
     onSuccess: (data) => {
       setResults(data.results);
+      setSelectedPlaceId(null);
       setHasSearched(true);
-      const gakuwariCount = data.results.filter((r) => r.has_gakuwari).length;
+
+      const gakuwariCount = data.results.filter((result) => result.has_gakuwari).length;
+
       if (gakuwariCount > 0) {
-        toast.success(`${data.results.length}件中 ${gakuwariCount}件の学割スポットが見つかりました！`);
-      } else if (data.results.length > 0) {
-        toast.info(`${data.results.length}件の店舗が見つかりましたが、学割情報は確認できませんでした。`);
-      } else {
-        toast.info("周辺に店舗が見つかりませんでした。範囲を広げてみてください。");
+        toast.success(`${data.results.length}件中 ${gakuwariCount}件で学割を確認しました。`);
+        return;
       }
+
+      if (data.results.length > 0) {
+        toast.info(
+          `指定範囲内の${data.results.length}件を深掘りしましたが、学割は確認できませんでした。`
+        );
+        return;
+      }
+
+      toast.info("指定範囲内に候補店舗が見つかりませんでした。");
     },
     onError: (error) => {
       toast.error(`検索に失敗しました: ${error.message}`);
     },
   });
 
-  // Get user location
   const getLocation = useCallback(() => {
     if (!navigator.geolocation) {
-      toast.error("お使いのブラウザは位置情報に対応していません。");
+      toast.error("このブラウザは位置情報に対応していません。");
       return;
     }
+
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-        setUserLocation(loc);
+      (position) => {
+        const location = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        };
+
+        setUserLocation(location);
+
         if (mapRef.current) {
-          mapRef.current.setCenter(loc);
+          mapRef.current.setCenter(location);
           mapRef.current.setZoom(15);
         }
-        toast.success("現在地を取得しました！");
+
+        toast.success("現在地を取得しました。");
       },
       () => {
         setUserLocation(DEFAULT_AGENT_LOCATION);
-        toast.error("位置情報の取得に失敗しました。ブラウザの設定を確認してください。");
-      },
+        toast.error("位置情報の取得に失敗しました。ブラウザの設定をご確認ください。");
+      }
     );
   }, []);
 
-  // Auto-get location on mount
   useEffect(() => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-        },
-        () => {
-          setUserLocation(DEFAULT_AGENT_LOCATION);
-        },
-      );
+    if (!navigator.geolocation) {
+      return;
     }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setUserLocation({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        });
+      },
+      () => {
+        setUserLocation(DEFAULT_AGENT_LOCATION);
+      }
+    );
   }, []);
 
-  // Handle search
   const handleSearch = () => {
     if (!userLocation) {
       toast.error("まず現在地を取得してください。");
       return;
     }
+
     agentSearch.mutate({
       lat: userLocation.lat,
       lng: userLocation.lng,
@@ -112,75 +172,88 @@ export default function AgentSearch() {
     });
   };
 
-  // Map ready
   const handleMapReady = useCallback((map: google.maps.Map) => {
     mapRef.current = map;
     infoWindowRef.current = new google.maps.InfoWindow();
 
-    // Allow clicking on map to set location
-    map.addListener("click", (e: google.maps.MapMouseEvent) => {
-      if (e.latLng) {
-        const loc = { lat: e.latLng.lat(), lng: e.latLng.lng() };
-        setUserLocation(loc);
-        toast.info("地図上の位置を検索地点に設定しました。");
+    map.addListener("click", (event: google.maps.MapMouseEvent) => {
+      if (!event.latLng) {
+        return;
       }
+
+      const location = {
+        lat: event.latLng.lat(),
+        lng: event.latLng.lng(),
+      };
+
+      setUserLocation(location);
+      toast.info("地図上の位置を検索の中心に設定しました。");
     });
   }, []);
 
-  // Update markers when results change
   useEffect(() => {
-    if (!mapRef.current) return;
+    if (!mapRef.current) {
+      return;
+    }
 
-    // Clear old markers
-    markersRef.current.forEach((m) => (m.map = null));
+    markersRef.current.forEach((marker) => {
+      marker.map = null;
+    });
     markersRef.current = [];
 
     const displayResults = filterGakuwariOnly
-      ? results.filter((r) => r.has_gakuwari)
+      ? results.filter((result) => result.has_gakuwari)
       : results;
 
-    if (displayResults.length === 0) return;
+    if (displayResults.length === 0) {
+      return;
+    }
 
     const bounds = new google.maps.LatLngBounds();
 
     displayResults.forEach((result) => {
-      const pinEl = document.createElement("div");
-      const isGakuwari = result.has_gakuwari;
-      pinEl.style.cssText = `
-        width: 36px; height: 36px; border-radius: 50%;
-        background: ${isGakuwari ? "#fde047" : "#e5e7eb"};
+      const status = getAgentResultStatus(result);
+      const pin = document.createElement("div");
+      const backgroundColor =
+        status.tone === "positive"
+          ? "#fde047"
+          : status.tone === "unknown"
+            ? "#ddd6fe"
+            : "#e5e7eb";
+
+      pin.style.cssText = `
+        width: 36px;
+        height: 36px;
+        border-radius: 999px;
+        background: ${backgroundColor};
         border: 2px solid #1a1a1a;
-        display: flex; align-items: center; justify-content: center;
-        font-size: 16px; cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+        font-weight: 700;
+        cursor: pointer;
         box-shadow: 2px 2px 0px #1a1a1a;
-        transition: transform 0.2s;
       `;
-      pinEl.textContent = isGakuwari ? "🎓" : "📍";
+      pin.textContent =
+        status.tone === "positive" ? "学" : status.tone === "unknown" ? "?" : "店";
 
       const marker = new google.maps.marker.AdvancedMarkerElement({
         map: mapRef.current!,
         position: { lat: result.lat, lng: result.lng },
         title: result.name,
-        content: pinEl,
+        content: pin,
       });
 
       marker.addListener("click", () => {
         setSelectedPlaceId(result.place_id);
-        if (infoWindowRef.current) {
-          infoWindowRef.current.setContent(`
-            <div style="font-family:'Noto Sans JP',sans-serif;padding:6px;max-width:240px;">
-              <strong style="font-size:14px;">${result.name}</strong>
-              ${isGakuwari
-                ? `<div style="margin:6px 0;padding:4px 8px;background:#fef9c3;border-radius:6px;font-size:12px;">
-                    🎓 ${result.discount_info || "学割あり"}
-                  </div>`
-                : `<p style="font-size:12px;color:#999;margin:4px 0;">学割情報なし</p>`
-              }
-              ${result.rating ? `<p style="font-size:11px;color:#666;">★ ${result.rating.toFixed(1)}</p>` : ""}
-              <p style="font-size:11px;color:#888;margin-top:4px;">${result.address}</p>
-            </div>
-          `);
-          infoWindowRef.current.open({ anchor: marker, map: mapRef.current });
+
+        if (infoWindowRef.current && mapRef.current) {
+          infoWindowRef.current.setContent(buildInfoWindowContent(result));
+          infoWindowRef.current.open({
+            anchor: marker,
+            map: mapRef.current,
+          });
         }
       });
 
@@ -188,106 +261,120 @@ export default function AgentSearch() {
       bounds.extend({ lat: result.lat, lng: result.lng });
     });
 
-    // Also include user location in bounds
     if (userLocation) {
       bounds.extend(userLocation);
     }
 
-    mapRef.current.fitBounds(bounds, { top: 50, right: 50, bottom: 50, left: 50 });
-  }, [results, filterGakuwariOnly, userLocation]);
+    mapRef.current.fitBounds(bounds, {
+      top: 50,
+      right: 50,
+      bottom: 50,
+      left: 50,
+    });
+  }, [filterGakuwariOnly, results, userLocation]);
 
-  // Add user location marker
   useEffect(() => {
-    if (!mapRef.current || !userLocation) return;
+    if (!mapRef.current || !userLocation) {
+      return;
+    }
 
-    const userPinEl = document.createElement("div");
-    userPinEl.style.cssText = `
-      width: 16px; height: 16px; border-radius: 50%;
-      background: #3b82f6; border: 3px solid white;
-      box-shadow: 0 0 8px rgba(59,130,246,0.5);
+    const pin = document.createElement("div");
+    pin.style.cssText = `
+      width: 16px;
+      height: 16px;
+      border-radius: 999px;
+      background: #3b82f6;
+      border: 3px solid #ffffff;
+      box-shadow: 0 0 8px rgba(59, 130, 246, 0.5);
     `;
 
-    const userMarker = new google.maps.marker.AdvancedMarkerElement({
+    const marker = new google.maps.marker.AdvancedMarkerElement({
       map: mapRef.current,
       position: userLocation,
       title: "現在地",
-      content: userPinEl,
+      content: pin,
     });
 
     return () => {
-      userMarker.map = null;
+      marker.map = null;
     };
   }, [userLocation]);
 
   const displayResults = filterGakuwariOnly
-    ? results.filter((r) => r.has_gakuwari)
+    ? results.filter((result) => result.has_gakuwari)
     : results;
-
-  const gakuwariCount = results.filter((r) => r.has_gakuwari).length;
+  const gakuwariCount = results.filter((result) => result.has_gakuwari).length;
 
   return (
     <div className="min-h-screen pb-20 md:pb-0">
-      {/* Header */}
       <section className="relative overflow-hidden py-6 sm:py-10">
         <MemphisBackground count={15} />
         <div className="container relative z-10">
-          <div className="max-w-2xl mx-auto text-center">
-            <div className="inline-flex items-center gap-2 bg-memphis-lilac/30 border-2 border-foreground rounded-full px-4 py-1.5 mb-3 shadow-[2px_2px_0px_oklch(0.15_0.01_0)]">
+          <div className="mx-auto max-w-2xl text-center">
+            <div className="mb-3 inline-flex items-center gap-2 rounded-full border-2 border-foreground bg-memphis-lilac/30 px-4 py-1.5 shadow-[2px_2px_0px_oklch(0.15_0.01_0)]">
               <Bot size={14} />
-              <span className="text-xs font-bold uppercase tracking-wider">AI Agent 検索</span>
+              <span className="text-xs font-bold uppercase tracking-wider">
+                AI Agent Search
+              </span>
             </div>
             <h1
-              className="text-3xl sm:text-4xl font-black uppercase tracking-tight leading-[1.1] mb-3"
+              className="mb-3 text-3xl font-black uppercase tracking-tight leading-[1.1] sm:text-4xl"
               style={{ textShadow: "3px 3px 0px oklch(0.82 0.12 290 / 0.5)" }}
             >
-              学割スポット発見
+              学割スポット探索
             </h1>
-            <p className="text-sm sm:text-base text-muted-foreground font-medium mb-4 max-w-md mx-auto">
-              AIが周辺の店舗を自動調査し、学割情報をリアルタイムで発見します。
+            <p className="mx-auto mb-4 max-w-md text-sm font-medium text-muted-foreground sm:text-base">
+              指定半径の中だけを広く集めて深く調べる、高精度な学割検索モードです。
             </p>
           </div>
         </div>
       </section>
 
-      {/* Search Controls */}
       <section className="py-4">
         <div className="container">
           <div className="memphis-card rounded-xl bg-card p-4 sm:p-6">
-            {/* Location */}
-            <div className="flex items-center gap-3 mb-4">
+            <div className="mb-4 flex items-center gap-3">
               <Button
                 onClick={getLocation}
                 variant="outline"
-                className="memphis-btn bg-memphis-mint/30 shrink-0"
+                className="memphis-btn shrink-0 bg-memphis-mint/30"
               >
                 <Navigation size={16} className="mr-1.5" />
                 現在地を取得
               </Button>
+
               {userLocation ? (
                 <p className="text-sm text-muted-foreground">
-                  <MapPin size={14} className="inline mr-1" />
+                  <MapPin size={14} className="mr-1 inline" />
                   {userLocation.lat.toFixed(4)}, {userLocation.lng.toFixed(4)}
-                  <span className="text-xs ml-1">(地図クリックで変更可)</span>
+                  <span className="ml-1 text-xs">(地図クリックでも変更できます)</span>
                 </p>
               ) : (
                 <p className="text-sm text-muted-foreground">位置情報を取得してください</p>
               )}
             </div>
 
-            {/* Keyword + Radius */}
-            <div className="flex flex-col sm:flex-row gap-3 mb-4">
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row">
               <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={16} />
+                <Search
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                  size={16}
+                />
                 <Input
                   value={keyword}
-                  onChange={(e) => setKeyword(e.target.value)}
-                  placeholder="キーワード（任意）: カフェ、ラーメン..."
-                  className="pl-9 h-11 border-2 border-foreground/20 rounded-lg"
-                  onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+                  onChange={(event) => setKeyword(event.target.value)}
+                  placeholder="キーワード任意: カフェ、ラーメン、カラオケ..."
+                  className="h-11 rounded-lg border-2 border-foreground/20 pl-9"
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      handleSearch();
+                    }
+                  }}
                 />
               </div>
+
               <Button
-                onClick={() => setShowFilters(!showFilters)}
+                onClick={() => setShowFilters((current) => !current)}
                 variant="outline"
                 size="sm"
                 className="memphis-btn sm:h-11"
@@ -297,42 +384,37 @@ export default function AgentSearch() {
               </Button>
             </div>
 
-            {/* Expandable filters */}
             {showFilters && (
-              <div className="bg-muted/50 rounded-lg p-4 mb-4 border-2 border-foreground/10 space-y-4">
-                {/* Search radius */}
+              <div className="mb-4 space-y-4 rounded-lg border-2 border-foreground/10 bg-muted/50 p-4">
                 <div>
-                  <label className="text-sm font-semibold block mb-2">
-                    検索範囲: {radius}m
+                  <label className="mb-2 block text-sm font-semibold">
+                    検索半径: {radius}m
                   </label>
                   <Slider
                     value={[radius]}
-                    onValueChange={([v]) => setRadius(v)}
+                    onValueChange={([value]) => setRadius(value)}
                     min={100}
                     max={5000}
                     step={100}
                     className="w-full"
                   />
-                  <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                  <div className="mt-1 flex justify-between text-xs text-muted-foreground">
                     <span>100m</span>
                     <span>5,000m</span>
                   </div>
                 </div>
 
-                {/* LLM provider toggle */}
                 <div>
-                  <label className="text-sm font-semibold block mb-2">
-                    AIモード
-                  </label>
+                  <label className="mb-2 block text-sm font-semibold">AIモード</label>
                   <div className="flex gap-2">
                     <button
                       type="button"
                       onClick={() => setLlmProvider("gemini")}
                       className={cn(
-                        "flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border-2 transition-colors",
+                        "flex items-center gap-1.5 rounded-lg border-2 px-3 py-2 text-sm font-medium transition-colors",
                         llmProvider === "gemini"
-                          ? "bg-memphis-yellow border-foreground shadow-[2px_2px_0px_oklch(0.15_0.01_0)]"
-                          : "bg-background border-foreground/20 hover:border-foreground/50"
+                          ? "border-foreground bg-memphis-yellow shadow-[2px_2px_0px_oklch(0.15_0.01_0)]"
+                          : "border-foreground/20 bg-background hover:border-foreground/50"
                       )}
                     >
                       <Cloud size={14} />
@@ -342,35 +424,38 @@ export default function AgentSearch() {
                       type="button"
                       onClick={() => setLlmProvider("ollama")}
                       className={cn(
-                        "flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border-2 transition-colors",
+                        "flex items-center gap-1.5 rounded-lg border-2 px-3 py-2 text-sm font-medium transition-colors",
                         llmProvider === "ollama"
-                          ? "bg-memphis-mint border-foreground shadow-[2px_2px_0px_oklch(0.15_0.01_0)]"
-                          : "bg-background border-foreground/20 hover:border-foreground/50"
+                          ? "border-foreground bg-memphis-mint shadow-[2px_2px_0px_oklch(0.15_0.01_0)]"
+                          : "border-foreground/20 bg-background hover:border-foreground/50"
                       )}
                     >
                       <Cpu size={14} />
                       Ollama（ローカルLLM）
                     </button>
                   </div>
-                  <p className="text-xs text-muted-foreground mt-1.5">
+                  <p className="mt-1.5 text-xs text-muted-foreground">
                     {llmProvider === "gemini"
                       ? "Google Gemini APIを使用。高速で安定しています。"
-                      : "Ollamaサーバーを使用。OLLAMA_AGENT_URLの設定が必要です。"}
+                      : "Ollamaサーバーを使用。OLLAMA_AGENT_URL の設定が必要です。"}
                   </p>
                 </div>
+
+                <p className="text-xs text-muted-foreground">
+                  半径は自動で広げず、指定範囲内だけを深掘りして調査します。
+                </p>
               </div>
             )}
 
-            {/* Search button */}
             <Button
               onClick={handleSearch}
               disabled={!userLocation || agentSearch.isPending}
-              className="w-full memphis-btn h-12 bg-primary text-primary-foreground text-base font-bold rounded-xl"
+              className="memphis-btn h-12 w-full rounded-xl bg-primary text-base font-bold text-primary-foreground"
             >
               {agentSearch.isPending ? (
                 <>
                   <Loader2 size={18} className="mr-2 animate-spin" />
-                  AIが調査中...（店舗数により3〜10分かかります）
+                  AI が調査中...
                 </>
               ) : (
                 <>
@@ -383,13 +468,12 @@ export default function AgentSearch() {
         </div>
       </section>
 
-      {/* Map */}
       <section className="py-4">
         <div className="container">
-          <div className="rounded-xl overflow-hidden border-2 border-foreground shadow-[4px_4px_0px_oklch(0.15_0.01_0)]">
+          <div className="overflow-hidden rounded-xl border-2 border-foreground shadow-[4px_4px_0px_oklch(0.15_0.01_0)]">
             <MapView
               className="h-[300px] sm:h-[400px]"
-              initialCenter={userLocation ?? { lat: 35.6812, lng: 139.7671 }}
+              initialCenter={userLocation ?? DEFAULT_AGENT_LOCATION}
               initialZoom={userLocation ? 15 : 13}
               onMapReady={handleMapReady}
             />
@@ -397,31 +481,29 @@ export default function AgentSearch() {
         </div>
       </section>
 
-      {/* Loading state */}
       {agentSearch.isPending && (
         <section className="py-6">
           <div className="container">
             <div className="memphis-card rounded-xl bg-card p-8 text-center">
-              <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-memphis-lilac/30 border-2 border-foreground mb-4">
-                <Bot size={32} className="text-primary animate-pulse" />
+              <div className="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-full border-2 border-foreground bg-memphis-lilac/30">
+                <Bot size={32} className="animate-pulse text-primary" />
               </div>
-              <h3 className="text-lg font-bold mb-2">AIが学割情報を調査中...</h3>
-              <p className="text-sm text-muted-foreground mb-4">
-                Google Mapsから周辺店舗を取得し、各店舗について
+              <h3 className="mb-2 text-lg font-bold">AI が学割情報を深掘り調査中...</h3>
+              <p className="mb-4 text-sm text-muted-foreground">
+                Google Maps から指定範囲内の候補店舗を広く集めたあと、
                 <br />
-                Web検索（SearXNG）で学割情報を調査しています。
+                Web検索（SearXNG）と AI の再確認で学割情報を深掘りしています。
                 <br />
-                <span className="text-xs mt-1 block">
-                  使用中のAI: {llmProvider === "ollama" ? "Ollama（ローカルLLM）" : "Gemini API"}
-                  　／　店舗数により3〜10分ほどかかる場合があります。
+                <span className="mt-1 block text-xs">
+                  使用中のAI: {llmProvider === "ollama" ? "Ollama（ローカルLLM）" : "Gemini API"}・通常は30〜60秒ほどで完了します。
                 </span>
               </p>
               <div className="flex justify-center gap-2">
-                {[0, 1, 2].map((i) => (
+                {[0, 1, 2].map((index) => (
                   <div
-                    key={i}
-                    className="w-3 h-3 rounded-full bg-primary animate-bounce"
-                    style={{ animationDelay: `${i * 0.2}s` }}
+                    key={index}
+                    className="h-3 w-3 animate-bounce rounded-full bg-primary"
+                    style={{ animationDelay: `${index * 0.2}s` }}
                   />
                 ))}
               </div>
@@ -430,20 +512,17 @@ export default function AgentSearch() {
         </section>
       )}
 
-      {/* Results */}
       {hasSearched && !agentSearch.isPending && (
         <section className="py-6">
           <div className="container">
-            {/* Results header */}
-            <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
               <div>
-                <h2 className="text-lg font-extrabold uppercase tracking-tight">
-                  検索結果
-                </h2>
+                <h2 className="text-lg font-extrabold uppercase tracking-tight">検索結果</h2>
                 <p className="text-sm text-muted-foreground">
-                  {results.length}件の店舗 / {gakuwariCount}件の学割スポット
+                  {results.length}件を調査 / {gakuwariCount}件で学割を確認
                 </p>
               </div>
+
               {gakuwariCount > 0 && (
                 <Button
                   variant={filterGakuwariOnly ? "default" : "outline"}
@@ -452,25 +531,24 @@ export default function AgentSearch() {
                     "memphis-btn text-xs",
                     filterGakuwariOnly && "bg-memphis-yellow text-foreground"
                   )}
-                  onClick={() => setFilterGakuwariOnly(!filterGakuwariOnly)}
+                  onClick={() => setFilterGakuwariOnly((current) => !current)}
                 >
-                  🎓 学割ありのみ ({gakuwariCount})
+                  学割ありのみ ({gakuwariCount})
                 </Button>
               )}
             </div>
 
-            {/* Results list */}
             {displayResults.length === 0 ? (
               <div className="memphis-card rounded-xl bg-card p-8 text-center">
-                <AlertCircle size={48} className="mx-auto text-muted-foreground/30 mb-3" />
-                <p className="text-muted-foreground font-medium">
+                <AlertCircle size={48} className="mx-auto mb-3 text-muted-foreground/30" />
+                <p className="font-medium text-muted-foreground">
                   {filterGakuwariOnly
-                    ? "学割スポットが見つかりませんでした。フィルターを解除してみてください。"
-                    : "周辺に店舗が見つかりませんでした。範囲を広げて再検索してみてください。"}
+                    ? "学割ありの店舗は見つかりませんでした。フィルターを外してご確認ください。"
+                    : "指定範囲内では学割を確認できませんでした。"}
                 </p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {displayResults.map((result) => (
                   <AgentResultCard
                     key={result.place_id}
@@ -478,6 +556,7 @@ export default function AgentSearch() {
                     isSelected={selectedPlaceId === result.place_id}
                     onClick={() => {
                       setSelectedPlaceId(result.place_id);
+
                       if (mapRef.current) {
                         mapRef.current.panTo({ lat: result.lat, lng: result.lng });
                         mapRef.current.setZoom(17);

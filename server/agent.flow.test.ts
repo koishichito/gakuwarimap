@@ -418,6 +418,86 @@ describe("searchGakuwariSpots", () => {
     expect(firstUrl).not.toContain("site%3A");
   });
 
+  it("uses broader student-pricing keywords for karaoke venues", async () => {
+    mockedMakeRequest.mockResolvedValueOnce({
+      status: "OK",
+      results: [
+        {
+          name: "Karaoke Echo",
+          formatted_address: "Shibuya",
+          place_id: "place_karaoke_1",
+          geometry: {
+            location: {
+              lat: 35.67,
+              lng: 139.7,
+            },
+          },
+          rating: 4.3,
+          types: ["karaoke"],
+        },
+      ],
+    } as never);
+    mockedMakeRequest.mockResolvedValueOnce({
+      status: "ZERO_RESULTS",
+      result: {},
+    } as never);
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            results: [
+              {
+                title: "Karaoke Echo",
+                url: "https://example.com/karaoke-student",
+                content: "学生料金あり",
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: {
+              "content-type": "application/json",
+            },
+          }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content:
+                    '{"has_gakuwari":true,"discount_info":"学生料金あり","source_url":"https://example.com/karaoke-student","confidence":"high"}',
+                },
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: {
+              "content-type": "application/json",
+            },
+          }
+        )
+      );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    await searchGakuwariSpots(35.67, 139.7, 500, "カラオケ");
+    const firstUrl = String(fetchMock.mock.calls[0]?.[0] ?? "");
+    const decodedUrl = decodeURIComponent(firstUrl);
+
+    expect(decodedUrl).toContain("カラオケ");
+    expect(decodedUrl).toContain("学生料金");
+    expect(decodedUrl).toContain("学生フリータイム");
+    expect(decodedUrl).toContain("中高生料金");
+  });
+
   it("keeps the nearby result when place details lookup fails", async () => {
     mockedMakeRequest.mockResolvedValueOnce({
       status: "OK",

@@ -184,7 +184,7 @@ export const appRouter = router({
           input.lng,
           input.radius ?? 500,
           input.keyword,
-          input.llmProvider ?? "gemini",
+          input.llmProvider ?? "gemini"
         );
         return { results };
       }),
