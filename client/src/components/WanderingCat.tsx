@@ -57,12 +57,24 @@ const TURN_POINT_MAX_DISTANCE = 320;
 const CAT_SPRINT_MULTIPLIER = 2.2;
 const SEARCH_AVOID_SELECTOR = '[data-cat-avoid-zone="search"]';
 const SEARCH_AVOID_PADDING = 18;
+const QUESTION_ROTATE_MS = 5000;
 
 type Rect = {
   left: number;
   right: number;
   top: number;
   bottom: number;
+};
+
+type FaqItem = {
+  id: number;
+  question: string;
+  answer: string;
+};
+
+type FaqPayload = {
+  title?: string;
+  items?: FaqItem[];
 };
 
 const getVisualScale = (viewportWidth: number) => {
@@ -133,9 +145,14 @@ export function WanderingCat() {
   const catRef = useRef<HTMLDivElement | null>(null);
   const rafIdRef = useRef<number | null>(null);
   const lastTimeRef = useRef<number | null>(null);
+  const pausedRef = useRef(false);
   const [isReady, setIsReady] = useState(false);
   const [useFallback, setUseFallback] = useState(false);
   const [spriteSrc, setSpriteSrc] = useState(SPRITE_URL);
+  const [faqItems, setFaqItems] = useState<FaqItem[]>([]);
+  const [activeFaqIndex, setActiveFaqIndex] = useState(0);
+  const [isPaused, setIsPaused] = useState(false);
+  const [isQaOpen, setIsQaOpen] = useState(false);
 
   const stateRef = useRef<CatState>({
     x: 36,
@@ -163,6 +180,80 @@ export function WanderingCat() {
     pageHeight: typeof document !== "undefined" ? Math.max(document.body.scrollHeight, document.documentElement.scrollHeight) : 720,
     scale: typeof window !== "undefined" ? getVisualScale(window.innerWidth) : 0.48,
   });
+
+  const activeFaq = faqItems.length > 0 ? faqItems[activeFaqIndex % faqItems.length] : null;
+
+  useEffect(() => {
+    pausedRef.current = isPaused;
+  }, [isPaused]);
+  // 吹き出しは猫と同じtransformで拡大縮小されるため、ローカル座標ではscaleを掛けない。
+  const bubbleWidth = CHIP_WIDTH * 1.5;
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    const loadFaq = async () => {
+      try {
+        const res = await fetch("/user-faq.json");
+        if (!res.ok) return;
+
+        const data = (await res.json()) as FaqPayload;
+        const items = Array.isArray(data.items)
+          ? data.items.filter((item): item is FaqItem => {
+              return (
+                typeof item?.id === "number" &&
+                typeof item?.question === "string" &&
+                typeof item?.answer === "string"
+              );
+            })
+          : [];
+
+        if (!isCancelled) {
+          setFaqItems(items);
+          setActiveFaqIndex(0);
+        }
+      } catch {
+        if (!isCancelled) {
+          setFaqItems([]);
+        }
+      }
+    };
+
+    loadFaq();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (faqItems.length <= 1 || isPaused) return;
+
+    const timerId = window.setInterval(() => {
+      setActiveFaqIndex((prev) => (prev + 1) % faqItems.length);
+    }, QUESTION_ROTATE_MS);
+
+    return () => {
+      window.clearInterval(timerId);
+    };
+  }, [faqItems.length, isPaused]);
+
+  useEffect(() => {
+    if (!isQaOpen) return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsQaOpen(false);
+        setIsPaused(false);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [isQaOpen]);
 
   useEffect(() => {
     let retryId: number | null = null;
@@ -277,6 +368,15 @@ export function WanderingCat() {
       lastTimeRef.current = time;
 
       const state = stateRef.current;
+
+      if (pausedRef.current) {
+        state.mode = "front";
+        state.frame = CAT_FRAMES.front;
+        setVisual();
+        rafIdRef.current = window.requestAnimationFrame(tick);
+        return;
+      }
+
       viewportRef.current.scrollY = window.scrollY;
       viewportRef.current.pageHeight = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
       const scaledWidth = CHIP_WIDTH * viewportRef.current.scale;
@@ -432,31 +532,135 @@ export function WanderingCat() {
 
   if (!isReady) return null;
 
+  const openQa = () => {
+    if (!activeFaq) return;
+    setIsPaused(true);
+    setIsQaOpen(true);
+  };
+
+  const closeQa = () => {
+    setIsQaOpen(false);
+    setIsPaused(false);
+  };
+
+  const showNextFaq = () => {
+    if (faqItems.length <= 1) return;
+    setActiveFaqIndex((prev) => (prev + 1) % faqItems.length);
+  };
+
   return (
-    <div className="pointer-events-none fixed inset-0 z-40 overflow-hidden" aria-hidden="true">
-      <div
-        ref={catRef}
-        className={useFallback ? "wandering-cat-sprite wandering-cat-sprite--fallback" : "wandering-cat-sprite"}
-        style={{
-          position: "absolute",
-          left: 0,
-          top: 0,
-          width: `${CHIP_WIDTH}px`,
-          height: `${CHIP_HEIGHT}px`,
-          backgroundImage: useFallback ? "none" : `url(${spriteSrc})`,
-          backgroundSize: `${CHIP_WIDTH * SPRITE_COLUMNS}px ${CHIP_HEIGHT * SPRITE_ROWS}px`,
-          backgroundRepeat: "no-repeat",
-          transformOrigin: "top left",
-          willChange: "transform, background-position",
-          backgroundPosition: "0px 0px",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontSize: useFallback ? "148px" : undefined,
-        }}
-      >
-        {useFallback ? "🐈" : null}
+    <>
+      <div className="pointer-events-none fixed inset-0 z-40 overflow-hidden" aria-hidden={isQaOpen}>
+        <div
+          ref={catRef}
+          role="button"
+          tabIndex={0}
+          aria-label="猫のQ&Aを開く"
+          onClick={openQa}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              openQa();
+            }
+          }}
+          className={useFallback ? "wandering-cat-sprite wandering-cat-sprite--fallback" : "wandering-cat-sprite"}
+          style={{
+            position: "absolute",
+            left: 0,
+            top: 0,
+            width: `${CHIP_WIDTH}px`,
+            height: `${CHIP_HEIGHT}px`,
+            backgroundImage: useFallback ? "none" : `url(${spriteSrc})`,
+            backgroundSize: `${CHIP_WIDTH * SPRITE_COLUMNS}px ${CHIP_HEIGHT * SPRITE_ROWS}px`,
+            backgroundRepeat: "no-repeat",
+            transformOrigin: "top left",
+            willChange: "transform, background-position",
+            backgroundPosition: "0px 0px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: useFallback ? "148px" : undefined,
+            pointerEvents: "auto",
+            cursor: "pointer",
+          }}
+        >
+          {activeFaq ? (
+            <div
+              style={{
+                position: "absolute",
+                bottom: "calc(100% + 0.5em)",
+                left: "50%",
+                transform: "translateX(-50%)",
+                  width: `${bubbleWidth}px`,
+                  boxSizing: "border-box",
+                borderRadius: "20px",
+                border: "2px solid rgb(22 22 22 / 95%)",
+                background: "rgb(255 255 255 / 96%)",
+                color: "rgb(29 29 29)",
+                padding: "16px 20px",
+                fontSize: "22px",
+                fontWeight: 600,
+                lineHeight: 1.5,
+                textAlign: "center",
+                boxShadow: "4px 4px 0 rgb(22 22 22 / 80%)",
+                pointerEvents: "auto",
+                whiteSpace: "normal",
+                wordWrap: "break-word",
+                maxHeight: "80px",
+                overflow: "hidden",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              {activeFaq.question}
+            </div>
+          ) : null}
+          {useFallback ? "🐈" : null}
+        </div>
       </div>
-    </div>
+
+      {isQaOpen && activeFaq ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="猫のQ&A"
+          onClick={closeQa}
+        >
+          <section
+            className="w-full max-w-3xl rounded-2xl border-2 border-black bg-white p-5 shadow-[6px_6px_0_0_rgba(0,0,0,0.8)] sm:p-6"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <p className="text-lg font-bold uppercase tracking-wide text-muted-foreground">Cat Q&A</p>
+            <h2 className="mt-1 text-4xl font-extrabold leading-tight">質問 {activeFaq.id}</h2>
+            <div className="mt-4 rounded-xl bg-muted p-4">
+              <p className="text-lg font-bold uppercase tracking-wide text-muted-foreground">Q</p>
+              <p className="mt-1 text-[1.8rem] font-semibold leading-relaxed">{activeFaq.question}</p>
+            </div>
+            <div className="mt-3 rounded-xl border border-border p-4">
+              <p className="text-lg font-bold uppercase tracking-wide text-muted-foreground">A</p>
+              <p className="mt-1 text-[1.55rem] leading-relaxed text-foreground">{activeFaq.answer}</p>
+            </div>
+            <div className="mt-5 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={showNextFaq}
+                className="rounded-md border-2 border-black bg-secondary px-6 py-3 text-xl font-bold text-secondary-foreground shadow-[2px_2px_0_0_rgba(0,0,0,0.85)]"
+              >
+                次の質問
+              </button>
+              <button
+                type="button"
+                onClick={closeQa}
+                className="rounded-md border-2 border-black bg-primary px-6 py-3 text-xl font-bold text-primary-foreground shadow-[2px_2px_0_0_rgba(0,0,0,0.85)]"
+              >
+                閉じる
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+    </>
   );
 }
