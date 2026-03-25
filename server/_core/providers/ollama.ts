@@ -78,6 +78,7 @@ export class OllamaProvider implements LLMProvider {
       messages: params.messages.map(toOllamaMessage),
       stream: false,
       keep_alive: -1,
+      think: false,
     };
 
     if (tools && toolChoice !== "none") {

@@ -4,6 +4,7 @@ import {
   type PlacesSearchResult,
 } from "./_core/map";
 import { resolveMapsMode } from "./_core/platform";
+import { createLLMProvider } from "./_core/providers";
 
 export interface AgentShop {
   name: string;
@@ -338,6 +339,44 @@ export function parseAgentResult(
   };
 }
 
+export type LLMProviderMode = "gemini" | "ollama";
+
+/**
+ * Unified LLM call that supports Gemini (default) and Ollama.
+ * Returns the assistant message content as a string.
+ */
+async function callLLMForAgent(
+  messages: AgentMessage[],
+  provider: LLMProviderMode = "gemini"
+): Promise<string> {
+  if (provider === "ollama") {
+    const llm = createLLMProvider({
+      ...process.env,
+      LLM_PROVIDER: "ollama",
+    });
+    console.log(`[Agent][Ollama] Requesting chat completion model=${process.env.OLLAMA_MODEL ?? process.env.LLM_MODEL ?? "qwen3.5:27b"}`);
+    const result = await llm.invoke({
+      messages: messages.map((m) => ({
+        role: m.role,
+        content: m.content,
+        ...(m.name ? { name: m.name } : {}),
+        ...(m.tool_call_id ? { tool_call_id: m.tool_call_id } : {}),
+      })),
+    });
+    const raw = result.choices?.[0]?.message?.content;
+    if (!raw) throw new Error("Ollama returned no message");
+    return typeof raw === "string"
+      ? raw
+      : raw.map((c) => (c.type === "text" ? c.text : "")).join("");
+  }
+
+  // Default: Gemini via OpenAI-compatible endpoint
+  const geminiResult = await callGeminiChatCompletion(messages);
+  const content = geminiResult.choices?.[0]?.message?.content;
+  if (!content) throw new Error("Gemini returned no message");
+  return content;
+}
+
 async function callGeminiChatCompletion(
   messages: AgentMessage[],
   tools: AgentTool[] = []
@@ -494,33 +533,54 @@ function isBeautySalon(shop: AgentShop): boolean {
   );
 }
 
+function isKaraoke(shop: AgentShop): boolean {
+  const types = shop.types ?? [];
+  if (types.some((t) => t.toLowerCase().includes("karaoke"))) return true;
+  return /カラオケ|まねきねこ|ビッグエコー|ジャンカラ|コート・ダジュール|シダックス/i.test(
+    shop.name
+  );
+}
+
+/**
+ * ブランチ名（例: "京橋店"）を除いたチェーン名を返す。
+ * "カラオケまねきねこ 京橋店" → "まねきねこ"
+ * "ビッグエコー 渋谷店"      → "ビッグエコー"
+ */
+function extractChainName(name: string): string {
+  // 末尾の「XX店」「XX号店」などを除去
+  const stripped = name.replace(/\s+\S*[店号館舗]\s*$/, "").trim();
+  // 先頭のカテゴリ語（"カラオケ"など、スペースなしでも除去）を除去
+  const withoutPrefix = stripped
+    .replace(/^(カラオケ|美容室|理容室|ヘアサロン)\s*/, "")
+    .trim();
+  return withoutPrefix.length >= 2 ? withoutPrefix : name;
+}
+
 function buildEvidenceSearchQuery(shop: AgentShop): string {
+  const chainName = extractChainName(shop.name);
   const host = getWebsiteHost(shop.website);
 
-  const searchTerms = ["学割", "学生割引", "学生"];
+  const searchTerms = ["学割", "学生"];
+
   if (isBeautySalon(shop)) {
     searchTerms.push(
       "学生カット",
       "学割U24",
       "U24",
-      "学生限定",
       "高校生",
       "大学生",
       "ホットペッパー",
       "minimo"
     );
+    if (host) searchTerms.push(host);
+  } else if (isKaraoke(shop)) {
+    searchTerms.push("学割フリータイム", "学生フリータイム", "学生限定");
+  } else {
+    searchTerms.push("学生割引");
+    if (host) searchTerms.push(host);
   }
 
-  if (host) {
-    searchTerms.push(host);
-  }
-
-  const addressHint =
-    typeof shop.address === "string" && shop.address.trim().length > 0
-      ? ` ${shop.address.trim().slice(0, 40)}`
-      : "";
-
-  return `"${shop.name}"${addressHint} ${searchTerms.join(" ")}`;
+  return `${chainName} ${searchTerms.join(" ")}`;
 }
 
 function buildEvidenceReviewMessage(
@@ -552,7 +612,10 @@ function buildEvidenceReviewMessage(
   return lines.join("\n");
 }
 
-async function runAgentForShop(shop: AgentShop): Promise<AgentResultItem> {
+async function runAgentForShop(
+  shop: AgentShop,
+  llmProvider: LLMProviderMode = "gemini"
+): Promise<AgentResultItem> {
   const startedAt = performance.now();
   const cached = getCachedAgentResult(shop);
   if (cached) {
@@ -567,31 +630,30 @@ async function runAgentForShop(shop: AgentShop): Promise<AgentResultItem> {
     const evidenceStartedAt = performance.now();
     const evidence = await searxngSearch(searchQuery);
     const evidenceMs = Math.round(performance.now() - evidenceStartedAt);
-    const geminiStartedAt = performance.now();
-    const result = await callGeminiChatCompletion([
-      { role: "system", content: SYSTEM_PROMPT },
-      {
-        role: "user",
-        content: buildEvidenceReviewMessage(shop, searchQuery, evidence),
-      },
-    ]);
-    const geminiMs = Math.round(performance.now() - geminiStartedAt);
-    const content = result.choices?.[0]?.message?.content;
+    const llmStartedAt = performance.now();
 
-    if (!content) {
-      throw new Error("Gemini returned no message");
-    }
+    const content = await callLLMForAgent(
+      [
+        { role: "system", content: SYSTEM_PROMPT },
+        {
+          role: "user",
+          content: buildEvidenceReviewMessage(shop, searchQuery, evidence),
+        },
+      ],
+      llmProvider
+    );
 
+    const llmMs = Math.round(performance.now() - llmStartedAt);
     const parsed = parseAgentResult(shop, content);
     cacheAgentResult(parsed);
     console.log(
-      `[Agent][Timing] Shop="${shop.name}" evidenceMs=${evidenceMs} geminiMs=${geminiMs} totalMs=${Math.round(
+      `[Agent][Timing][${llmProvider}] Shop="${shop.name}" evidenceMs=${evidenceMs} llmMs=${llmMs} totalMs=${Math.round(
         performance.now() - startedAt
       )}`
     );
     return parsed;
   } catch (error) {
-    console.error(`[Agent][Gemini] Shop="${shop.name}" failed:`, error);
+    console.error(`[Agent][${llmProvider}] Shop="${shop.name}" failed:`, error);
     return createDefaultResult(shop);
   }
 }
@@ -706,7 +768,8 @@ export async function searchGakuwariSpots(
   lat: number,
   lng: number,
   radius: number = 500,
-  keyword?: string
+  keyword?: string,
+  llmProvider: LLMProviderMode = "gemini"
 ): Promise<GakuwariSearchResult[]> {
   const startedAt = performance.now();
   const shops = (await searchNearbyPlacesBase(lat, lng, radius, keyword)).slice(
@@ -720,7 +783,7 @@ export async function searchGakuwariSpots(
   }
 
   console.log(
-    `[Agent][Gemini] Investigating ${shops.length} nearby shops for discounts`
+    `[Agent][${llmProvider}] Investigating ${shops.length} nearby shops for discounts`
   );
 
   const enrichedShopsPromise = enrichShopsWithPlaceDetails(shops);
@@ -729,11 +792,11 @@ export async function searchGakuwariSpots(
   for (let index = 0; index < shops.length; index += BATCH_SIZE) {
     const batch = shops.slice(index, index + BATCH_SIZE);
     const batchResults = await Promise.all(
-      batch.map((shop) => runAgentForShop(shop))
+      batch.map((shop) => runAgentForShop(shop, llmProvider))
     );
     allResults.push(...batchResults);
     console.log(
-      `[Agent][Gemini] Completed ${Math.min(index + BATCH_SIZE, shops.length)}/${shops.length} shops`
+      `[Agent][${llmProvider}] Completed ${Math.min(index + BATCH_SIZE, shops.length)}/${shops.length} shops`
     );
   }
 

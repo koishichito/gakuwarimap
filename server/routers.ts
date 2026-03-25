@@ -176,6 +176,7 @@ export const appRouter = router({
         lng: z.number(),
         radius: z.number().min(100).max(5000).optional(),
         keyword: z.string().optional(),
+        llmProvider: z.enum(["gemini", "ollama"]).optional(),
       }))
       .mutation(async ({ input }) => {
         const results = await searchGakuwariSpots(
@@ -183,6 +184,7 @@ export const appRouter = router({
           input.lng,
           input.radius ?? 500,
           input.keyword,
+          input.llmProvider ?? "gemini",
         );
         return { results };
       }),

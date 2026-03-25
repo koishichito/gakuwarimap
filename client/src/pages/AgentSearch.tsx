@@ -16,6 +16,8 @@ import {
   AlertCircle,
   Sparkles,
   Filter,
+  Cpu,
+  Cloud,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -33,6 +35,7 @@ export default function AgentSearch() {
   const [hasSearched, setHasSearched] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [filterGakuwariOnly, setFilterGakuwariOnly] = useState(false);
+  const [llmProvider, setLlmProvider] = useState<"gemini" | "ollama">("gemini");
 
   const mapRef = useRef<google.maps.Map | null>(null);
   const markersRef = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
@@ -105,6 +108,7 @@ export default function AgentSearch() {
       lng: userLocation.lng,
       radius,
       keyword: keyword.trim() || undefined,
+      llmProvider,
     });
   };
 
@@ -295,21 +299,64 @@ export default function AgentSearch() {
 
             {/* Expandable filters */}
             {showFilters && (
-              <div className="bg-muted/50 rounded-lg p-4 mb-4 border-2 border-foreground/10">
-                <label className="text-sm font-semibold block mb-2">
-                  検索範囲: {radius}m
-                </label>
-                <Slider
-                  value={[radius]}
-                  onValueChange={([v]) => setRadius(v)}
-                  min={100}
-                  max={5000}
-                  step={100}
-                  className="w-full"
-                />
-                <div className="flex justify-between text-xs text-muted-foreground mt-1">
-                  <span>100m</span>
-                  <span>5,000m</span>
+              <div className="bg-muted/50 rounded-lg p-4 mb-4 border-2 border-foreground/10 space-y-4">
+                {/* Search radius */}
+                <div>
+                  <label className="text-sm font-semibold block mb-2">
+                    検索範囲: {radius}m
+                  </label>
+                  <Slider
+                    value={[radius]}
+                    onValueChange={([v]) => setRadius(v)}
+                    min={100}
+                    max={5000}
+                    step={100}
+                    className="w-full"
+                  />
+                  <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                    <span>100m</span>
+                    <span>5,000m</span>
+                  </div>
+                </div>
+
+                {/* LLM provider toggle */}
+                <div>
+                  <label className="text-sm font-semibold block mb-2">
+                    AIモード
+                  </label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setLlmProvider("gemini")}
+                      className={cn(
+                        "flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border-2 transition-colors",
+                        llmProvider === "gemini"
+                          ? "bg-memphis-yellow border-foreground shadow-[2px_2px_0px_oklch(0.15_0.01_0)]"
+                          : "bg-background border-foreground/20 hover:border-foreground/50"
+                      )}
+                    >
+                      <Cloud size={14} />
+                      Gemini（高速・推奨）
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLlmProvider("ollama")}
+                      className={cn(
+                        "flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border-2 transition-colors",
+                        llmProvider === "ollama"
+                          ? "bg-memphis-mint border-foreground shadow-[2px_2px_0px_oklch(0.15_0.01_0)]"
+                          : "bg-background border-foreground/20 hover:border-foreground/50"
+                      )}
+                    >
+                      <Cpu size={14} />
+                      Ollama（ローカルLLM）
+                    </button>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1.5">
+                    {llmProvider === "gemini"
+                      ? "Google Gemini APIを使用。高速で安定しています。"
+                      : "Ollamaサーバーを使用。OLLAMA_AGENT_URLの設定が必要です。"}
+                  </p>
                 </div>
               </div>
             )}
@@ -364,7 +411,10 @@ export default function AgentSearch() {
                 <br />
                 Web検索（SearXNG）で学割情報を調査しています。
                 <br />
-                <span className="text-xs mt-1 block">店舗数により3〜10分ほどかかる場合があります。</span>
+                <span className="text-xs mt-1 block">
+                  使用中のAI: {llmProvider === "ollama" ? "Ollama（ローカルLLM）" : "Gemini API"}
+                  　／　店舗数により3〜10分ほどかかる場合があります。
+                </span>
               </p>
               <div className="flex justify-center gap-2">
                 {[0, 1, 2].map((i) => (
