@@ -46,7 +46,7 @@ export const resolveLLMConfig = (
         env.OLLAMA_AGENT_URL ||
         "https://ollama.gitpullpull.me",
       apiKey: env.LLM_API_KEY || env.OLLAMA_API_KEY || "",
-      model: env.LLM_MODEL || env.OLLAMA_MODEL || "qwen3.5:27b",
+      model: env.LLM_MODEL || env.OLLAMA_MODEL || "Qwen3.5:35b-a3b",
       timeoutMs: Number(env.LLM_TIMEOUT_MS ?? 180_000),
     };
   }
