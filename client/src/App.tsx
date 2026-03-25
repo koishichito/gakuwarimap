@@ -11,6 +11,7 @@ import SpotDetail from "./pages/SpotDetail";
 import SearchPage from "./pages/SearchPage";
 import SubmitSpot from "./pages/SubmitSpot";
 import AgentSearch from "./pages/AgentSearch";
+import { WanderingCat } from "./components/WanderingCat";
 
 function Router() {
   return (
@@ -35,6 +36,7 @@ function App() {
           <Toaster />
           <Navbar />
           <Router />
+          <WanderingCat />
         </TooltipProvider>
       </ThemeProvider>
     </ErrorBoundary>

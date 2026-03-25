@@ -3,10 +3,9 @@ import { MapPin, List, PlusCircle, Search, Bot } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
-  { href: "/", label: "ホーム", icon: MapPin },
+  { href: "/agent", label: "AI検索", icon: Bot },
   { href: "/spots", label: "一覧", icon: List },
   { href: "/search", label: "検索", icon: Search },
-  { href: "/agent", label: "AI検索", icon: Bot },
   { href: "/submit", label: "投稿", icon: PlusCircle },
 ];
 
