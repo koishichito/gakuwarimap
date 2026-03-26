@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertCircle,
+  ArrowUp,
   Bot,
   Cloud,
   Cpu,
@@ -82,12 +83,18 @@ export default function AgentSearch() {
   const mapRef = useRef<google.maps.Map | null>(null);
   const markersRef = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
   const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
+  const mapSectionRef = useRef<HTMLElement>(null);
+  const resultsSectionRef = useRef<HTMLElement>(null);
 
   const agentSearch = trpc.agent.searchGakuwari.useMutation({
     onSuccess: (data) => {
       setResults(data.results);
       setSelectedPlaceId(null);
       setHasSearched(true);
+
+      setTimeout(() => {
+        resultsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 100);
 
       const gakuwariCount = data.results.filter((result) => result.has_gakuwari).length;
 
@@ -468,7 +475,7 @@ export default function AgentSearch() {
         </div>
       </section>
 
-      <section className="py-4">
+      <section ref={mapSectionRef} className="py-4">
         <div className="container">
           <div className="overflow-hidden rounded-xl border-2 border-foreground shadow-[4px_4px_0px_oklch(0.15_0.01_0)]">
             <MapView
@@ -513,7 +520,7 @@ export default function AgentSearch() {
       )}
 
       {hasSearched && !agentSearch.isPending && (
-        <section className="py-6">
+        <section ref={resultsSectionRef} className="py-6">
           <div className="container">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
               <div>
@@ -522,6 +529,17 @@ export default function AgentSearch() {
                   {results.length}件を調査 / {gakuwariCount}件で学割を確認
                 </p>
               </div>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="memphis-btn text-xs"
+                  onClick={() => mapSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                >
+                  <ArrowUp size={13} className="mr-1" />
+                  地図へ戻る
+                </Button>
 
               {gakuwariCount > 0 && (
                 <Button
@@ -536,6 +554,7 @@ export default function AgentSearch() {
                   学割ありのみ ({gakuwariCount})
                 </Button>
               )}
+              </div>
             </div>
 
             {displayResults.length === 0 ? (
