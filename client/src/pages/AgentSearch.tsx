@@ -70,6 +70,8 @@ export default function AgentSearch() {
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(
     DEFAULT_AGENT_LOCATION
   );
+  const [latInput, setLatInput] = useState(DEFAULT_AGENT_LOCATION.lat.toFixed(6));
+  const [lngInput, setLngInput] = useState(DEFAULT_AGENT_LOCATION.lng.toFixed(6));
   const [keyword, setKeyword] = useState("");
   const [radius, setRadius] = useState(500);
   const [results, setResults] = useState<AgentResult[]>([]);
@@ -110,6 +112,18 @@ export default function AgentSearch() {
     },
   });
 
+  const applyLocation = useCallback(
+    (location: { lat: number; lng: number }) => {
+      setUserLocation(location);
+      setLatInput(location.lat.toFixed(6));
+      setLngInput(location.lng.toFixed(6));
+      if (mapRef.current) {
+        mapRef.current.setCenter(location);
+      }
+    },
+    []
+  );
+
   const getLocation = useCallback(() => {
     if (!navigator.geolocation) {
       toast.error("このブラウザは位置情報に対応していません。");
@@ -122,22 +136,16 @@ export default function AgentSearch() {
           lat: position.coords.latitude,
           lng: position.coords.longitude,
         };
-
-        setUserLocation(location);
-
-        if (mapRef.current) {
-          mapRef.current.setCenter(location);
-          mapRef.current.setZoom(15);
-        }
-
+        applyLocation(location);
+        if (mapRef.current) mapRef.current.setZoom(15);
         toast.success("現在地を取得しました。");
       },
       () => {
-        setUserLocation(DEFAULT_AGENT_LOCATION);
+        applyLocation(DEFAULT_AGENT_LOCATION);
         toast.error("位置情報の取得に失敗しました。ブラウザの設定をご確認ください。");
       }
     );
-  }, []);
+  }, [applyLocation]);
 
   useEffect(() => {
     if (!navigator.geolocation) {
@@ -146,16 +154,16 @@ export default function AgentSearch() {
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        setUserLocation({
+        applyLocation({
           lat: position.coords.latitude,
           lng: position.coords.longitude,
         });
       },
       () => {
-        setUserLocation(DEFAULT_AGENT_LOCATION);
+        applyLocation(DEFAULT_AGENT_LOCATION);
       }
     );
-  }, []);
+  }, [applyLocation]);
 
   const handleSearch = () => {
     if (!userLocation) {
@@ -181,15 +189,13 @@ export default function AgentSearch() {
         return;
       }
 
-      const location = {
+      applyLocation({
         lat: event.latLng.lat(),
         lng: event.latLng.lng(),
-      };
-
-      setUserLocation(location);
+      });
       toast.info("地図上の位置を検索の中心に設定しました。");
     });
-  }, []);
+  }, [applyLocation]);
 
   useEffect(() => {
     if (!mapRef.current) {
@@ -343,15 +349,41 @@ export default function AgentSearch() {
                 現在地を取得
               </Button>
 
-              {userLocation ? (
-                <p className="text-sm text-muted-foreground">
-                  <MapPin size={14} className="mr-1 inline" />
-                  {userLocation.lat.toFixed(4)}, {userLocation.lng.toFixed(4)}
-                  <span className="ml-1 text-xs">(地図クリックでも変更できます)</span>
-                </p>
-              ) : (
-                <p className="text-sm text-muted-foreground">位置情報を取得してください</p>
-              )}
+              <div className="flex items-center gap-1.5 flex-1">
+                <MapPin size={14} className="shrink-0 text-muted-foreground" />
+                <input
+                  type="number"
+                  step="any"
+                  aria-label="緯度"
+                  placeholder="緯度"
+                  value={latInput}
+                  onChange={(e) => {
+                    setLatInput(e.target.value);
+                    const v = parseFloat(e.target.value);
+                    if (!isNaN(v) && v >= -90 && v <= 90) {
+                      setUserLocation((prev) => ({ lat: v, lng: prev?.lng ?? DEFAULT_AGENT_LOCATION.lng }));
+                    }
+                  }}
+                  className="w-32 rounded border border-foreground/20 bg-background px-2 py-1 text-xs tabular-nums focus:outline-none focus:ring-1 focus:ring-foreground/40"
+                />
+                <span className="text-xs text-muted-foreground">,</span>
+                <input
+                  type="number"
+                  step="any"
+                  aria-label="経度"
+                  placeholder="経度"
+                  value={lngInput}
+                  onChange={(e) => {
+                    setLngInput(e.target.value);
+                    const v = parseFloat(e.target.value);
+                    if (!isNaN(v) && v >= -180 && v <= 180) {
+                      setUserLocation((prev) => ({ lat: prev?.lat ?? DEFAULT_AGENT_LOCATION.lat, lng: v }));
+                    }
+                  }}
+                  className="w-32 rounded border border-foreground/20 bg-background px-2 py-1 text-xs tabular-nums focus:outline-none focus:ring-1 focus:ring-foreground/40"
+                />
+                <span className="text-xs text-muted-foreground hidden sm:inline">(地図クリックでも変更可)</span>
+              </div>
             </div>
 
             <div className="mb-4 flex flex-col gap-3 sm:flex-row">
