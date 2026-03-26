@@ -26,8 +26,6 @@ const WAITING_CAT_SPRITE_URL = "/waiting-cat.png";
 const WAITING_CAT_FRAME_COUNT = 4;
 const WAITING_CAT_FRAME_MS = 2000;
 const WAITING_TIP_ROTATE_MS = 3200;
-const MIN_WAITING_OVERLAY_MS = 5000;
-const WAITING_CAT_FALLBACK_SPRITE_URL = "/cat-sprite.png";
 const WAITING_CAT_DISPLAY_SIZE = 320;
 const WAITING_CAT_FRAME_SIZE = 1024;
 const WAITING_CAT_SPRITE_BASE_WIDTH = 2048;
@@ -99,16 +97,16 @@ export default function AgentSearch() {
   const [showFilters, setShowFilters] = useState(false);
   const [filterGakuwariOnly, setFilterGakuwariOnly] = useState(false);
   const [llmProvider, setLlmProvider] = useState<"gemini" | "ollama">("gemini");
-  const [isWaitingOverlayVisible, setIsWaitingOverlayVisible] = useState(false);
   const [waitingFrame, setWaitingFrame] = useState(0);
   const [waitingSpriteUrl, setWaitingSpriteUrl] = useState(WAITING_CAT_SPRITE_URL);
   const [waitingSpriteWidth, setWaitingSpriteWidth] = useState(WAITING_CAT_SPRITE_BASE_WIDTH);
   const [waitingSpriteHeight, setWaitingSpriteHeight] = useState(WAITING_CAT_SPRITE_BASE_HEIGHT);
+  const [waitingSpriteStatus, setWaitingSpriteStatus] = useState<"idle" | "loading" | "ready" | "error">(
+    "idle"
+  );
   const [waitingTip, setWaitingTip] = useState<string>(
     WAITING_TIPS[Math.floor(Math.random() * WAITING_TIPS.length)]
   );
-  const waitingOverlayStartedAtRef = useRef<number | null>(null);
-  const waitingOverlayTimeoutRef = useRef<number | null>(null);
 
   const mapRef = useRef<google.maps.Map | null>(null);
   const markersRef = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
@@ -193,14 +191,6 @@ export default function AgentSearch() {
       toast.error("まず現在地を取得してください。");
       return;
     }
-
-    if (waitingOverlayTimeoutRef.current != null) {
-      window.clearTimeout(waitingOverlayTimeoutRef.current);
-      waitingOverlayTimeoutRef.current = null;
-    }
-
-    waitingOverlayStartedAtRef.current = Date.now();
-    setIsWaitingOverlayVisible(true);
 
     agentSearch.mutate({
       lat: userLocation.lat,
@@ -340,8 +330,13 @@ export default function AgentSearch() {
   }, [userLocation]);
 
   useEffect(() => {
+    if (!agentSearch.isPending || waitingSpriteStatus !== "idle") {
+      return;
+    }
+
     let cancelled = false;
     const image = new Image();
+    setWaitingSpriteStatus("loading");
 
     image.onload = () => {
       if (cancelled) {
@@ -351,16 +346,14 @@ export default function AgentSearch() {
       setWaitingSpriteUrl(WAITING_CAT_SPRITE_URL);
       setWaitingSpriteWidth(image.naturalWidth || WAITING_CAT_SPRITE_BASE_WIDTH);
       setWaitingSpriteHeight(image.naturalHeight || WAITING_CAT_SPRITE_BASE_HEIGHT);
+      setWaitingSpriteStatus("ready");
     };
 
     image.onerror = () => {
       if (cancelled) {
         return;
       }
-
-      setWaitingSpriteUrl(WAITING_CAT_FALLBACK_SPRITE_URL);
-      setWaitingSpriteWidth(WAITING_CAT_SPRITE_BASE_WIDTH);
-      setWaitingSpriteHeight(WAITING_CAT_SPRITE_BASE_HEIGHT);
+      setWaitingSpriteStatus("error");
     };
 
     image.src = WAITING_CAT_SPRITE_URL;
@@ -368,10 +361,10 @@ export default function AgentSearch() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [agentSearch.isPending, waitingSpriteStatus]);
 
   useEffect(() => {
-    if (!isWaitingOverlayVisible) {
+    if (!agentSearch.isPending) {
       return;
     }
 
@@ -397,43 +390,13 @@ export default function AgentSearch() {
       window.clearInterval(frameIntervalId);
       window.clearInterval(tipIntervalId);
     };
-  }, [isWaitingOverlayVisible]);
-
-  useEffect(() => {
-    if (!isWaitingOverlayVisible || agentSearch.isPending) {
-      return;
-    }
-
-    const startedAt = waitingOverlayStartedAtRef.current ?? Date.now();
-    const elapsed = Date.now() - startedAt;
-    const remaining = Math.max(0, MIN_WAITING_OVERLAY_MS - elapsed);
-
-    waitingOverlayTimeoutRef.current = window.setTimeout(() => {
-      setIsWaitingOverlayVisible(false);
-      waitingOverlayTimeoutRef.current = null;
-      waitingOverlayStartedAtRef.current = null;
-    }, remaining);
-
-    return () => {
-      if (waitingOverlayTimeoutRef.current != null) {
-        window.clearTimeout(waitingOverlayTimeoutRef.current);
-        waitingOverlayTimeoutRef.current = null;
-      }
-    };
-  }, [agentSearch.isPending, isWaitingOverlayVisible]);
-
-  useEffect(() => {
-    return () => {
-      if (waitingOverlayTimeoutRef.current != null) {
-        window.clearTimeout(waitingOverlayTimeoutRef.current);
-      }
-    };
-  }, []);
+  }, [agentSearch.isPending]);
 
   const displayResults = filterGakuwariOnly
     ? results.filter((result) => result.has_gakuwari)
     : results;
   const gakuwariCount = results.filter((result) => result.has_gakuwari).length;
+  const showWaitingSprite = waitingSpriteStatus === "ready";
   const waitingFrameCoordinate =
     WAITING_CAT_FRAME_COORDINATES[waitingFrame] ?? WAITING_CAT_FRAME_COORDINATES[0];
   const waitingFrameXPercent =
@@ -593,10 +556,10 @@ export default function AgentSearch() {
 
             <Button
               onClick={handleSearch}
-              disabled={!userLocation || agentSearch.isPending || isWaitingOverlayVisible}
+              disabled={!userLocation || agentSearch.isPending}
               className="memphis-btn h-12 w-full rounded-xl bg-primary text-base font-bold text-primary-foreground"
             >
-              {agentSearch.isPending || isWaitingOverlayVisible ? (
+              {agentSearch.isPending ? (
                 <>
                   <Loader2 size={18} className="mr-2 animate-spin" />
                   AI が調査中...
@@ -625,24 +588,41 @@ export default function AgentSearch() {
         </div>
       </section>
 
-      {isWaitingOverlayVisible && (
+      {agentSearch.isPending && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-background/75 px-4 backdrop-blur-sm">
           <div className="memphis-card w-full max-w-2xl rounded-2xl border-2 border-foreground bg-card/95 p-5 text-center shadow-[6px_6px_0px_oklch(0.15_0.01_0)] sm:p-7">
             <h3 className="mb-4 text-2xl font-black tracking-tight">検索中...</h3>
             <div className="mb-4 flex justify-center">
               <div
-                className="overflow-hidden rounded-3xl border-2 border-foreground bg-memphis-lilac/20 shadow-[4px_4px_0px_oklch(0.15_0.01_0)]"
+                className="grid overflow-hidden rounded-3xl border-2 border-foreground bg-memphis-lilac/20 shadow-[4px_4px_0px_oklch(0.15_0.01_0)]"
                 style={{
                   width: `min(${WAITING_CAT_DISPLAY_SIZE}px, 72vw)`,
                   height: `min(${WAITING_CAT_DISPLAY_SIZE}px, 72vw)`,
-                  backgroundImage: `url(${waitingSpriteUrl})`,
-                  backgroundRepeat: "no-repeat",
-                  backgroundPosition: `${waitingFrameXPercent}% ${waitingFrameYPercent}%`,
-                  backgroundSize: `${waitingBackgroundWidthPercent}% ${waitingBackgroundHeightPercent}%`,
                 }}
-                role="img"
-                aria-label="検索中の待機猫アニメーション"
-              />
+              >
+                {showWaitingSprite ? (
+                  <div
+                    className="h-full w-full"
+                    style={{
+                      backgroundImage: `url(${waitingSpriteUrl})`,
+                      backgroundRepeat: "no-repeat",
+                      backgroundPosition: `${waitingFrameXPercent}% ${waitingFrameYPercent}%`,
+                      backgroundSize: `${waitingBackgroundWidthPercent}% ${waitingBackgroundHeightPercent}%`,
+                    }}
+                    role="img"
+                    aria-label="検索中の待機猫アニメーション"
+                  />
+                ) : (
+                  <div className="grid h-full w-full place-items-center gap-3 p-6 text-center">
+                    <Loader2 size={56} className="animate-spin text-primary" />
+                    <p className="text-sm font-bold leading-relaxed text-foreground">
+                      {waitingSpriteStatus === "error"
+                        ? "待機画像なしでそのまま調査を続けています。"
+                        : "クーぽんにゃんを呼んでいます..."}
+                    </p>
+                  </div>
+                )}
+              </div>
             </div>
             <p className="mb-4 text-sm font-medium text-muted-foreground sm:text-base">
               AI が学割情報を深掘り調査中です。しばらくお待ちください。
