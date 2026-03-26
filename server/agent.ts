@@ -358,18 +358,21 @@ const STUDENT_NEGATIVE_PATTERNS = [
 ];
 
 const SYSTEM_PROMPT = [
-  "You verify whether a place offers any student-oriented pricing or benefit.",
-  "Use only the provided store info and evidence snippets.",
-  "Do not make up discounts that are not supported by the evidence.",
-  "Treat category-specific student pricing such as 学生カット, 学割U24, U24, 学生限定クーポン, and 高校生 or 大学生料金 as valid student discounts.",
-  "Treat explicit student rates, student plans, student-ID offers, student-only coupons, and category-specific student menus or tickets as valid student discounts.",
-  "Examples include 学生料金, 学生価格, 学生プラン, 学生証提示, 学生限定, 学生フリータイム, 学生パック, 学生チケット, 学生入場料, 学生カット, 学割U24, 高校生料金, 大学生料金, and 専門学生料金.",
+  "あなたは学割・学生向け特典を調査するエージェントです。",
+  "提供された店舗情報とエビデンスのみを使用してください。エビデンスにない割引を作らないでください。",
+  "学生カット、学割U24、U24、学生限定クーポン、高校生料金、大学生料金はすべて有効な学割として扱ってください。",
+  "学生料金、学生価格、学生プラン、学生証提示、学生限定、学生フリータイム、学生パック、学生チケット、学生入場料、専門学生料金なども有効です。",
+  "学割が確認できた場合は、discount_infoに以下を含めてください:",
+  "  - 割引の具体的な内容（例：学生証提示で入場料20%引き、学生フリータイム3時間550円、ライス無料サービスなど）",
+  "  - 割引率・割引額・無料サービスがわかる場合はその数値",
+  "  - 条件（学生証提示、アプリ提示、平日限定など）",
+  "  - discount_infoは日本語で記述すること。",
   "Return a JSON object only with these keys:",
-  '{"has_gakuwari":true,"discount_info":"string","source_url":"string","confidence":"high|medium|low"}',
-  "Use an empty string when discount details or source_url are unavailable.",
-  "confidence should be high only when the discount is explicitly confirmed by a reliable source.",
-  "Use confidence=low when the evidence is missing, ambiguous, indirect, or only weakly suggests a student offer.",
-  "Use has_gakuwari=false with medium or high confidence only when the evidence explicitly says student pricing is unavailable or not applicable.",
+  '{"has_gakuwari":true,"discount_info":"日本語で割引の具体的内容","source_url":"string","confidence":"high|medium|low"}',
+  "discount_infoが不明な場合のみ空文字列を使用する。source_urlが不明な場合は空文字列。",
+  "confidenceはエビデンスで明示的に確認できた場合のみhigh。",
+  "エビデンスが曖昧・断片的・間接的な場合はconfidence=low。",
+  "エビデンスが学割なしと明示している場合のみhas_gakuwari=falseかつconfidence=mediumまたはhigh。",
 ].join("\n");
 
 const DEFAULT_PARSED_RESULT: ParsedAgentResult = {
@@ -380,13 +383,15 @@ const DEFAULT_PARSED_RESULT: ParsedAgentResult = {
 };
 
 const REVIEW_SYSTEM_PROMPT = [
-  "You are the reviewer in a student discount agent team.",
-  "Re-check a high-priority store that previously looked negative or low-confidence.",
-  "Use only the provided store info and evidence snippets.",
-  "If the evidence still does not explicitly support a student discount, return has_gakuwari=false.",
-  "Treat 学生カット, 学割U24, U24, 学生限定クーポン, 高校生料金, and 大学生料金 as valid student discounts.",
+  "あなたは学割調査チームのレビュワーです。",
+  "以前の判定が否定的または低確信度だった高優先店舗を再確認してください。",
+  "提供されたエビデンスのみを使用してください。",
+  "学生カット、学割U24、U24、学生限定クーポン、高校生料金、大学生料金はすべて有効な学割として扱ってください。",
+  "学割が確認できた場合は、discount_infoに割引の具体的な内容を日本語で記述してください。",
+  "  例：「学生証提示でフリータイム料金550円（通常880円）」「ライス無料サービス（学生証提示）」「入場料20%引き」",
+  "エビデンスが依然として学割を明示的に支持していない場合はhas_gakuwari=falseを返してください。",
   "Return a JSON object only with these keys:",
-  '{"has_gakuwari":true,"discount_info":"string","source_url":"string","confidence":"high|medium|low"}',
+  '{"has_gakuwari":true,"discount_info":"日本語で割引の具体的内容","source_url":"string","confidence":"high|medium|low"}',
 ].join("\n");
 
 const SEARCH_PROFILE_DEFINITIONS: SearchProfileDefinition[] = [
@@ -1278,23 +1283,20 @@ function buildEvidenceReviewMessage(
     lines.push(`Website: ${shop.website}`);
   }
 
-  lines.push("Evidence snippets:");
+  lines.push("エビデンス:");
   lines.push(evidence);
-  lines.push("Check whether the store offers any student-oriented pricing or benefit.");
+  lines.push("この店舗に学割・学生向け特典があるか調査してください。");
   lines.push(
-    "If the evidence does not explicitly support a student discount, return has_gakuwari=false with low confidence."
+    "学割が確認できた場合、discount_infoに割引の具体的な内容を日本語で記述してください。"
   );
   lines.push(
-    "Treat 学生カット, 学割U24, U24, 学生限定クーポン, 高校生料金, and 大学生料金 as valid student discounts."
+    "例：「学生証提示でフリータイム550円」「ライス無料サービス」「入場料20%引き」「学生プラン月額980円」など。"
   );
   lines.push(
-    "Check whether the store offers any student-oriented pricing or benefit."
+    "割引率・割引額・無料特典・条件（平日限定、アプリ提示など）がわかる場合は含めてください。"
   );
   lines.push(
-    "Student discounts include student pricing, student plans, student-ID benefits, student-only coupons, and category-specific student menus, passes, or tickets."
-  );
-  lines.push(
-    "If the evidence does not explicitly support a student discount, return has_gakuwari=false with low confidence."
+    "エビデンスが学割を明示的に支持しない場合はhas_gakuwari=false、confidence=lowを返してください。"
   );
   lines.push("Return JSON only.");
 
@@ -1458,23 +1460,23 @@ function buildAdaptiveEvidenceReviewMessage(
     lines.push(`User intent keyword: ${userKeyword.trim()}`);
   }
 
-  lines.push("Evidence snippets:");
+  lines.push("エビデンス:");
   lines.push(evidence);
-  lines.push("Check whether the store offers a student discount.");
+  lines.push("この店舗に学割・学生向け特典があるか調査してください。");
   lines.push(
-    "Student discounts include student pricing, student plans, student-ID benefits, student-only coupons, and category-specific student menus or passes."
+    "学割が確認できた場合、discount_infoに割引の具体的な内容を日本語で記述してください。"
   );
   lines.push(
-    "Examples include 学生料金, 学生価格, 学生プラン, 学生証提示, 学生限定, 学生フリータイム, 学生パック, 学生チケット, 学生入場料, 学生カット, 学割U24, 高校生料金, 大学生料金, and 専門学生料金."
+    "例：「学生証提示でフリータイム550円（通常880円）」「ライス無料サービス（学生証提示）」「入場料20%引き」「学生カット3,300円」など。"
   );
   lines.push(
-    "If the evidence is ambiguous or missing, return has_gakuwari=false with confidence=low."
+    "割引率・割引額・無料特典・条件（平日限定、アプリ提示など）がわかる場合は含めてください。"
   );
   lines.push(
-    "Re-check this high-priority candidate. If evidence explicitly supports any student-oriented pricing or benefit, set has_gakuwari=true."
+    "エビデンスが曖昧または不足している場合はhas_gakuwari=false、confidence=lowを返してください。"
   );
   lines.push(
-    "If evidence is still insufficient, keep has_gakuwari=false and use low or medium confidence."
+    "高優先候補の再確認です。エビデンスが学生向け料金・特典を明示的に支持する場合はhas_gakuwari=trueにしてください。"
   );
   lines.push("Return JSON only.");
 
@@ -2333,20 +2335,23 @@ function buildVerifierMessage(
     lines.push(`User intent keyword: ${userKeyword.trim()}`);
   }
 
-  lines.push("Evidence snippets:");
+  lines.push("エビデンス:");
   lines.push(evidence.summary);
-  lines.push("Check whether the store offers a student discount.");
+  lines.push("この店舗に学割・学生向け特典があるか調査してください。");
   lines.push(
-    "If the evidence does not explicitly support a student discount, return has_gakuwari=false."
+    "学割が確認できた場合、discount_infoに割引の具体的な内容を日本語で記述してください。"
   );
   lines.push(
-    "Student discounts include student pricing, student plans, student memberships, student tickets, student menus, U24 offers, student-ID benefits, and student-only coupons."
+    "例：「学生証提示でフリータイム550円（通常880円）」「ライス無料サービス（学生証提示）」「入場料20%引き」など。"
+  );
+  lines.push(
+    "割引率・割引額・無料特典・条件（平日限定、アプリ提示など）がわかる場合は含めてください。"
   );
   if (categoryExamples.length > 0) {
-    lines.push(`Category examples: ${categoryExamples.join(", ")}`);
+    lines.push(`カテゴリ別の例: ${categoryExamples.join("、")}`);
   }
   lines.push(
-    "Treat 学生カット, 学割U24, U24, 学生限定クーポン, 高校生料金, and 大学生料金 as valid student discounts."
+    "エビデンスが学割を明示的に支持しない場合はhas_gakuwari=falseを返してください。"
   );
   lines.push("Return JSON only.");
 
@@ -2381,20 +2386,26 @@ function buildReviewerMessage(
     lines.push(`User intent keyword: ${userKeyword.trim()}`);
   }
 
-  lines.push("Evidence snippets:");
+  lines.push("エビデンス:");
   lines.push(evidence.summary);
   lines.push(
-    "Re-check this high-priority candidate. If evidence explicitly supports any student-oriented pricing or benefit, set has_gakuwari=true."
+    "高優先候補の再確認です。エビデンスが学生向け料金・特典を明示的に支持する場合はhas_gakuwari=trueにしてください。"
   );
   lines.push(
-    "If evidence is still insufficient, keep has_gakuwari=false and use low or medium confidence."
+    "学割が確認できた場合、discount_infoに割引の具体的な内容を日本語で記述してください。"
   );
   lines.push(
-    "Student discounts include student pricing, student plans, student memberships, student tickets, student menus, U24 offers, student-ID benefits, and student-only coupons."
+    "例：「学生証提示でフリータイム550円（通常880円）」「ライス無料サービス（学生証提示）」「入場料20%引き」など。"
+  );
+  lines.push(
+    "割引率・割引額・無料特典・条件がわかる場合は含めてください。"
   );
   if (categoryExamples.length > 0) {
-    lines.push(`Category examples: ${categoryExamples.join(", ")}`);
+    lines.push(`カテゴリ別の例: ${categoryExamples.join("、")}`);
   }
+  lines.push(
+    "エビデンスが依然として不十分な場合はhas_gakuwari=falseのままにし、confidence=lowまたはmediumを使用してください。"
+  );
   lines.push("Return JSON only.");
 
   return lines.join("\n");
