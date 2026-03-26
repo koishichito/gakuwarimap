@@ -73,12 +73,17 @@ export class OllamaProvider implements LLMProvider {
 
     const { tools, toolChoice, responseFormat } = resolveInvocationOptions(params);
 
+    const numBatch = Number(process.env.OLLAMA_NUM_BATCH ?? 2048);
+
     const payload: Record<string, unknown> = {
       model: this.config.model,
       messages: params.messages.map(toOllamaMessage),
       stream: false,
       keep_alive: -1,
       think: false,
+      options: {
+        num_batch: numBatch,
+      },
     };
 
     if (tools && toolChoice !== "none") {
