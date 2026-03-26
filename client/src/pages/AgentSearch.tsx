@@ -70,8 +70,8 @@ export default function AgentSearch() {
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(
     DEFAULT_AGENT_LOCATION
   );
-  const [latInput, setLatInput] = useState(DEFAULT_AGENT_LOCATION.lat.toFixed(6));
-  const [lngInput, setLngInput] = useState(DEFAULT_AGENT_LOCATION.lng.toFixed(6));
+  const [addressInput, setAddressInput] = useState("");
+  const [isGeocoding, setIsGeocoding] = useState(false);
   const [keyword, setKeyword] = useState("");
   const [radius, setRadius] = useState(500);
   const [results, setResults] = useState<AgentResult[]>([]);
@@ -112,11 +112,21 @@ export default function AgentSearch() {
     },
   });
 
+  const reverseGeocode = useCallback((location: { lat: number; lng: number }) => {
+    const geocoder = new google.maps.Geocoder();
+    geocoder.geocode({ location }, (results, status) => {
+      if (status === "OK" && results && results[0]) {
+        setAddressInput(results[0].formatted_address);
+      }
+    });
+  }, []);
+
   const applyLocation = useCallback(
-    (location: { lat: number; lng: number }) => {
+    (location: { lat: number; lng: number }, address?: string) => {
       setUserLocation(location);
-      setLatInput(location.lat.toFixed(6));
-      setLngInput(location.lng.toFixed(6));
+      if (address !== undefined) {
+        setAddressInput(address);
+      }
       if (mapRef.current) {
         mapRef.current.setCenter(location);
       }
@@ -137,6 +147,7 @@ export default function AgentSearch() {
           lng: position.coords.longitude,
         };
         applyLocation(location);
+        reverseGeocode(location);
         if (mapRef.current) mapRef.current.setZoom(15);
         toast.success("現在地を取得しました。");
       },
@@ -145,7 +156,7 @@ export default function AgentSearch() {
         toast.error("位置情報の取得に失敗しました。ブラウザの設定をご確認ください。");
       }
     );
-  }, [applyLocation]);
+  }, [applyLocation, reverseGeocode]);
 
   useEffect(() => {
     if (!navigator.geolocation) {
@@ -154,16 +165,19 @@ export default function AgentSearch() {
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        applyLocation({
+        const location = {
           lat: position.coords.latitude,
           lng: position.coords.longitude,
-        });
+        };
+        applyLocation(location);
+        reverseGeocode(location);
       },
       () => {
-        applyLocation(DEFAULT_AGENT_LOCATION);
+        // permission denied or unavailable — keep defaults
       }
     );
-  }, [applyLocation]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleSearch = () => {
     if (!userLocation) {
@@ -189,13 +203,15 @@ export default function AgentSearch() {
         return;
       }
 
-      applyLocation({
+      const location = {
         lat: event.latLng.lat(),
         lng: event.latLng.lng(),
-      });
+      };
+      applyLocation(location);
+      reverseGeocode(location);
       toast.info("地図上の位置を検索の中心に設定しました。");
     });
-  }, [applyLocation]);
+  }, [applyLocation, reverseGeocode]);
 
   useEffect(() => {
     if (!mapRef.current) {
@@ -349,42 +365,41 @@ export default function AgentSearch() {
                 現在地を取得
               </Button>
 
-              <div className="flex items-center gap-1.5 flex-1">
-                <MapPin size={14} className="shrink-0 text-muted-foreground" />
+              <div className="relative flex-1">
+                <MapPin size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                 <input
-                  type="number"
-                  step="any"
-                  aria-label="緯度"
-                  placeholder="緯度"
-                  value={latInput}
-                  onChange={(e) => {
-                    setLatInput(e.target.value);
-                    const v = parseFloat(e.target.value);
-                    if (!isNaN(v) && v >= -90 && v <= 90) {
-                      setUserLocation((prev) => ({ lat: v, lng: prev?.lng ?? DEFAULT_AGENT_LOCATION.lng }));
+                  type="text"
+                  aria-label="住所・エリア"
+                  placeholder="住所やエリアを入力（例: 大阪市都島区）"
+                  value={addressInput}
+                  onChange={(e) => setAddressInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && addressInput.trim()) {
+                      setIsGeocoding(true);
+                      const geocoder = new google.maps.Geocoder();
+                      geocoder.geocode({ address: addressInput.trim() }, (results, status) => {
+                        setIsGeocoding(false);
+                        if (status === "OK" && results && results[0]) {
+                          const loc = results[0].geometry.location;
+                          applyLocation({ lat: loc.lat(), lng: loc.lng() });
+                          if (mapRef.current) mapRef.current.setZoom(15);
+                        } else {
+                          toast.error("住所が見つかりませんでした。別の住所をお試しください。");
+                        }
+                      });
                     }
                   }}
-                  className="w-32 rounded border border-foreground/20 bg-background px-2 py-1 text-xs tabular-nums focus:outline-none focus:ring-1 focus:ring-foreground/40"
+                  disabled={isGeocoding}
+                  className="h-10 w-full rounded-lg border-2 border-foreground/20 bg-background pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-foreground/40 disabled:opacity-60"
                 />
-                <span className="text-xs text-muted-foreground">,</span>
-                <input
-                  type="number"
-                  step="any"
-                  aria-label="経度"
-                  placeholder="経度"
-                  value={lngInput}
-                  onChange={(e) => {
-                    setLngInput(e.target.value);
-                    const v = parseFloat(e.target.value);
-                    if (!isNaN(v) && v >= -180 && v <= 180) {
-                      setUserLocation((prev) => ({ lat: prev?.lat ?? DEFAULT_AGENT_LOCATION.lat, lng: v }));
-                    }
-                  }}
-                  className="w-32 rounded border border-foreground/20 bg-background px-2 py-1 text-xs tabular-nums focus:outline-none focus:ring-1 focus:ring-foreground/40"
-                />
-                <span className="text-xs text-muted-foreground hidden sm:inline">(地図クリックでも変更可)</span>
+                {isGeocoding && (
+                  <Loader2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-muted-foreground" />
+                )}
               </div>
             </div>
+            <p className="mb-3 -mt-2 text-xs text-muted-foreground">
+              Enterで住所を地図に反映。地図クリックでも場所を選択できます。
+            </p>
 
             <div className="mb-4 flex flex-col gap-3 sm:flex-row">
               <div className="relative flex-1">
